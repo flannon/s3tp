@@ -25,6 +25,7 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"path/filepath"
 	//"reflect"
 	"net/url"
 	"os"
@@ -81,7 +82,7 @@ func Ls(svc *s3.S3, bucketName string) {
 
 	fmt.Println("bucketName from Ls():", bucketName)
 
-	// s is for String - maybe not the best here, u might be more appropriate for url
+	// s is for String - maybe not the best here, u might be mnore appropriate for url
 	fmt.Println("buckerName:", bucketName)
 	s, err := url.Parse(bucketName)
 	if err != nil {
@@ -90,7 +91,7 @@ func Ls(svc *s3.S3, bucketName string) {
 	b := s.Host
 	p := s.Path
 	fmt.Println("bucket:", b)
-	fmt.Println("path:", p)
+	fmt.Println("path-:", p)
 
 	if len(p) != 0 {
 		fmt.Println("Path exists:", p)
@@ -124,32 +125,61 @@ func Ls(svc *s3.S3, bucketName string) {
 	}
 }
 
-// Lls local ls
-func Lls(p string) {
-	fmt.Println("print p", p)
+// Lls prepairs the list of local files to be uploaded.
+func Lls(p string) []string {
+
+	var fl []string
+
 	fi, err := os.Stat(p)
 	if err != nil {
 		fmt.Println(err)
-		return
+		//return
 	}
+
+	// When -lls is passed a directory name it will process
+	// all regular files in the directory tree.
 	switch mode := fi.Mode(); {
 	case mode.IsDir():
-		// do directory stuff
-		fmt.Println("It's a directory")
-		fmt.Println("Do the file walk and list all keys")
-	case mode.IsRegular():
-		s := fi.Size()
-		if fi.Size() > 10240 {
-			// Multipart uploads can be performed on objects from 5 MB to 5 TB
-			// each part has to be >= 5MB
-			fmt.Println(s, " is greater than 10240")
-			fmt.Println(s, " send file as multi part upload")
-		} else {
-			fmt.Println(fi.Name(), "is < 10240 bytes, send as single file")
+		err := filepath.Walk(p, func(path string, info os.FileInfo, err error) error {
+			if err != nil {
+				fmt.Printf("prevent panic by handling error accessing a path %q: %v\n", p, err)
+				return err
+			}
+			if strings.Contains(path, "/.") == false {
+				// I think this is redundant, but I need to look at it again.
+				if !info.IsDir() {
+					fmt.Printf("path+: %q\n", path)
+					// push the path onto the slice
+					fl = append(fl, path)
+				}
+			}
+			return nil
+		})
+		if err != nil {
+			fmt.Printf("error walking the path %q: %v\n", p, err)
 		}
-		//fmt.Println("Size", fi.Size(), "Bytes")
-		//fmt.Println("Mode", fi.Mode())
+
+	// When -lls is passed a file name it will process a single file
+	case mode.IsRegular():
+		if !fi.IsDir() {
+			fmt.Println("File:", p)
+		}
+		/*
+			// This part goes in `put`
+				s := fi.Size()
+				if fi.Size() > 10240 {
+					// Multipart uploads can be performed on objects from 5 MB to 5 TB
+					// each part has to be >= 5MB
+					fmt.Println(s, " is greater than 10240")
+					fmt.Println(s, " send file as multi part upload")
+				} else {
+					fmt.Println(fi.Name(), "is < 10240 bytes, send as single file")
+				}
+				//fmt.Println("Size", fi.Size(), "Bytes")
+				//fmt.Println("Mode", fi.Mode())
+		*/
 	}
+	return fl
 
 }
 
@@ -186,15 +216,39 @@ func main() {
 	}
 	if *flagLls == true {
 		var path string
-		if len(flag.Args()) == 1 {
+		// doing it like this hides the . files in the current directory
+		if len(flag.Args()) == 0 {
+			fmt.Println("We're at . print all files names")
+			//path = fmt.Sprint("./")
+			val, _ := os.Getwd()
+			//  This seciton can get . as the path, but then it still returns the dot files
+			//
+			wd, err := os.Getwd()
+			if err != nil {
+				log.Fatal(err)
+			}
+			paths := []string{
+				wd,
+			}
+			//base := "./"
+			base, _ := os.Getwd()
+			for _, pa := range paths {
+				rel, _ := filepath.Rel(base, pa)
+				fmt.Printf("%q: %q %v\n", pa, rel, err)
+				fmt.Println("rel:", rel)
+				path = rel
+			}
+
+			_ = val
+			//path = val
+		} else if len(flag.Args()) == 1 {
 			for _, val := range flag.Args() {
 				//fmt.Println(index, ":", val)
 				path = val
 			}
-		} else if len(flag.Args()) == 0 {
-			path = fmt.Sprint("print all files names")
 		}
-		Lls(path)
+		fl := Lls(path)
+		_ = fl
 	}
 
 }
